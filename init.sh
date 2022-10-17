@@ -3,13 +3,14 @@
 disk="/dev/nvme0n1"
 boot="/dev/nvme0n1p1"
 root="/dev/nvme0n1p2"
-hostname="tester"
+
+script_path="/script"
 
 # Applications
 base="linux linux-firmware base base-devel iwd zsh"
 amd="amd-ucode libva-mesa-driver xf86-video-amdgpu mesa mesa-vdpau vulkan-radeon"
 xorg="picom xclip xorg-server xorg-xev xorg-xinit"
-tools="feh firefox mpc mpd mpv ncmpcpp openssh p7zip pass zathura zathura-pdf-mupdf"
+tools="feh firefox mpc mpd mpv ncmpcpp openssh p7zip pass zathura zathura-pdf-mupdf stow"
 development="fd git languagetool neovim ripgrep tectonic"
 fonts="noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-jetbrains-mono"
 sound="pipewire pipewire-alsa pipewire-jack pipewire-pulse pulsemixer wireplumber"
@@ -25,42 +26,39 @@ install_linux()
 	pacstrap -K /mnt $base $amd $xorg $tools $development $fonts $sound $languages
 }
 
-install_yay()
+install_personal()
 {
 	echo "---------------------------------------"
-	echo " YAY INSTALL"
+	echo " PERSONAL INSTALL"
 	echo "---------------------------------------"
 	read -n1 -sp 'Press enter to continue...'
 
-	git clone https://aur.archlinux.org/yay.git
-	cd yay
-	makepkg -si
-	cd ..
-	rm -rf yay
-}
-
-install_suckless()
-{
-	echo "---------------------------------------"
-	echo " SUCKLESS INSTALL"
-	echo "---------------------------------------"
-	read -n1 -sp 'Press enter to continue...'
+	git clone git@github.com:tom1slav/linux.git /home/$user/.linux
+	mkdir -p /home/$user/.config
+	mkdir -p /home/$user/.local
+	cd /home/$user/.linux
+	stow .
 
 	git clone git@github.com:tom1slav/dwm.git /home/$user/code/linux/dwm
 	git clone git@github.com:tom1slav/dmenu.git /home/$user/code/linux/dmenu
 	git clone git@github.com:tom1slav/st.git /home/$user/code/linux/st
-	git clone git@github.com:tom1slav/block.git /home/$user/code/linux/block
+	git clone git@github.com:tom1slav/blocks.git /home/$user/code/linux/blocks
 	git clone git@github.com:tom1slav/slock.git /home/$user/code/linux/slock
+
+	read -n1 -sp 'Press enter to continue...'
+
 	cd /home/$user/code/linux/dwm
 	sudo make clean install
 	cd /home/$user/code/linux/dmenu
 	sudo make clean install
 	cd /home/$user/code/linux/st
 	sudo make clean install
-	cd /home/$user/code/linux/block
+	cd /home/$user/code/linux/blocks
 	sudo make clean install
 	cd /home/$user/code/linux/slock
 	sudo make clean install
+
+	rm -rf /home/$user/.bash*
 }
 
 partition()
@@ -103,8 +101,7 @@ format()
 {
 	echo "---------------------------------------"
 	echo " FORMAT DISKS"
-	echo "---------------------------------------"
-	read -n1 -sp 'Press enter to continue...'
+	echo "---------------------------------------" read -n1 -sp 'Press enter to continue...'
 
 	mkfs.ext4 /dev/mapper/root
 	mkfs.fat -F32 $boot
@@ -147,11 +144,51 @@ settings()
 	systemctl enable systemd-resolved.service
 }
 
-read -p 'Enter your username: ' user
-read -sp 'Enter your password: ' pass
-clear
+key_install()
+{
+	echo "---------------------------------------"
+	echo " INSTALL KEYS"
+	echo "---------------------------------------"
+	read -n1 -sp 'Press enter to continue...'
+
+	cp -r $script_path/.gnupg /mnt/home/$user/
+	cp -r $script_path/.ssh /mnt/home/$user/
+}
+
+key_setup()
+{
+	echo "---------------------------------------"
+	echo " SETUP KEYS"
+	echo "---------------------------------------"
+	read -n1 -sp 'Press enter to continue...'
+
+	sudo chown -R $user:$user /home/$user
+	chmod 600 /home/$user/.ssh/*
+
+	find /home/$user/.gnupg -type f -exec chmod 600 {} \;
+	find /home/$user/.gnupg -type d -exec chmod 700 {} \;
+}
+
+boot_setup()
+{
+	uuid=$(blkid $root | awk '{ print $2 }' | sed 's/"//g')
+	echo -e "default arch.conf\ntimeout 4\nconsole-mode max\neditor no" > /mnt/boot/loader/loader.conf
+	echo -e "title Arch Linux\nlinux /vmlinuz-linux\ninitrd /amd-ucode.img\ninitrd /initramfs-linux.img\noptions cryptdevice=$uuid:root root=/dev/mapper/root rw" > /mnt/boot/loader/entries/arch.conf
+}
 
 loadkeys de-latin1
+
+read -p 'Enter your username: ' user
+read -sp 'Enter your password: ' pass
+read -p 'Enter your hostname: ' hostname
+clear
+
+export user
+export pass
+
+export -f settings
+export -f key_setup
+export -f install_personal
 
 partition
 encrypt
@@ -160,11 +197,11 @@ format
 install_linux
 prepare
 
-export user
-export pass
-
-export -f settings
-export -f install_suckless
-
 arch-chroot /mnt /bin/bash -c "settings" || echo "arch-chroot returned: $?"
-arch-chroot -u $user /mnt /bin/bash -c "install_suckless" || echo "arch-chroot returned: $?"
+
+key_install
+
+arch-chroot -u $user /mnt /bin/bash -c "key_setup" || echo "arch-chroot returned: $?"
+arch-chroot -u $user /mnt /bin/bash -c "install_personal" || echo "arch-chroot returned: $?"
+
+boot_setup
